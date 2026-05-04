@@ -1,0 +1,108 @@
+# Default model registry, bundled with the service. To add or replace models,
+# build a derivative image that copies a modified version of this file over
+# /app/src/image_gen_svc/default_registry.yml. The service does not honor a
+# runtime overlay.
+#
+# Each entry's `path` is where the checkpoint lives in-container (default:
+# /models). Single-file checkpoints use `url`; HF snapshots use `repo_id`.
+# Either way the model is populated by one of two paths:
+#   - offline: `python scripts/pull_models.py` (run as a one-shot container
+#     against the same /models volume), or
+#   - lazy: first /render request for the model returns 503 model_loading and
+#     schedules the fetch in the background; the caller retries shortly.
+# `sha256` is verified post-download for `url` entries when non-null.
+# `safe: true` marks the model as not-specifically-NSFW-tuned; the request-time
+# `safe` filter uses this. A missing `safe:` parses as `false` (uncensored).
+models:
+  z-image-turbo:
+    path: /models/z-image-turbo
+    repo_id: Tongyi-MAI/Z-Image-Turbo
+    sha256: null
+    aliases: [photorealistic, stylized_realism]
+    architecture: z_image
+    vram_gb: 16
+    seed_stability: medium
+    license: apache-2.0
+    safe: true
+    default_steps: 4
+    default_guidance: 3.5
+  animagine-xl-4.0:
+    path: /models/animagine-xl-4.0.safetensors
+    url: https://huggingface.co/cagliostrolab/animagine-xl-4.0/resolve/main/animagine-xl-4.0.safetensors
+    sha256: null
+    aliases: [illustration, anime, fantasy]
+    architecture: sdxl
+    vram_gb: 7
+    seed_stability: high
+    license: faipl-1.0
+    safe: true
+    default_steps: 25
+    default_guidance: 7.0
+  chroma-1-hd:
+    path: /models/Chroma1-HD
+    repo_id: lodestones/Chroma1-HD
+    # The repo also ships a single-file Chroma1-HD.safetensors plus ComfyUI
+    # workflow/sample images alongside the diffusers components. Pull only
+    # the components from_pretrained needs.
+    allow_patterns:
+      - model_index.json
+      - transformer/*
+      - text_encoder/*
+      - vae/*
+      - tokenizer/*
+      - scheduler/*
+    aliases: [photorealistic, stylized_realism]
+    architecture: chroma
+    vram_gb: 13
+    seed_stability: medium
+    license: apache-2.0
+    safe: false
+    default_steps: 28
+    default_guidance: 4.0
+  realvis-xl-v5:
+    path: /models/RealVisXL_V5.0_fp16.safetensors
+    url: https://huggingface.co/SG161222/RealVisXL_V5.0/resolve/main/RealVisXL_V5.0_fp16.safetensors
+    sha256: null
+    aliases: [photorealistic_lowvram]
+    architecture: sdxl
+    vram_gb: 7
+    seed_stability: high
+    license: creativeml-openrail-m
+    safe: true
+    default_steps: 25
+    default_guidance: 7.0
+  pony-v7-base:
+    path: /models/pony-v7-base
+    repo_id: purplesmartai/pony-v7-base
+    # The repo is ~60 GB total because it bundles GGUF/LoRA/ComfyUI variants
+    # alongside the diffusers components. Pull only the diffusers core
+    # (~14 GB).
+    allow_patterns:
+      - model_index.json
+      - transformer/*
+      - text_encoder/*
+      - vae/*
+      - tokenizer/*
+      - scheduler/*
+    aliases: [illustration, anime, fantasy]
+    architecture: auraflow
+    vram_gb: 13
+    seed_stability: medium
+    license: pony-permissive
+    safe: false
+    default_steps: 25
+    default_guidance: 5.0
+
+# Tiebreaker when an alias has multiple matching models after the safety
+# filter. Keys are alias names; values are model ids.
+default_models:
+  photorealistic: chroma-1-hd
+  stylized_realism: chroma-1-hd
+  illustration: pony-v7-base
+  anime: pony-v7-base
+  fantasy: pony-v7-base
+  photorealistic_lowvram: realvis-xl-v5
+
+# Default fallback alias: when persona-web sends an unspecified model_id and
+# the target prompt has no hint, this is the model we pick.
+default_alias: photorealistic

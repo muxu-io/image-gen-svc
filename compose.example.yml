@@ -1,0 +1,31 @@
+services:
+  image-gen-svc:
+    image: ghcr.io/muxu-io/image-gen-svc:v0.1.0
+    container_name: image-gen-svc
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:7300:7300"
+    volumes:
+      - image-gen-models:/models
+      - image-gen-hf-cache:/root/.cache/huggingface
+    environment:
+      IMAGE_GEN_SVC_PORT: "7300"
+      IMAGE_GEN_SVC_MODELS_DIR: /models
+      HF_HOME: /root/.cache/huggingface
+      # IMAGE_GEN_API_KEY: optional bearer-token gate for /render
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:7300/health || exit 1"]
+      interval: 15s
+      timeout: 3s
+      retries: 5
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+volumes:
+  image-gen-models:
+  image-gen-hf-cache:
