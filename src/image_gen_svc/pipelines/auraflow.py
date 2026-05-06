@@ -18,6 +18,7 @@ Not unit-tested."""
 
 from __future__ import annotations
 
+import contextlib
 import time
 from pathlib import Path
 
@@ -84,13 +85,11 @@ class AuraFlowPipelineAdapter:
         )
 
     async def aclose(self) -> None:
-        try:
+        with contextlib.suppress(Exception):
             import torch
 
             del self._pipe
             torch.cuda.empty_cache()
-        except Exception:
-            pass
 
 
 def factory(model_path: Path):

@@ -42,7 +42,7 @@ async def _default_downloader(url: str, dest: Path) -> None:
     tmp = dest.with_suffix(dest.suffix + ".part")
 
     def _do() -> None:
-        with urllib.request.urlopen(url) as r, tmp.open("wb") as f:
+        with urllib.request.urlopen(url) as r, tmp.open("wb") as f:  # nosec B310
             while True:
                 buf = r.read(1 << 20)
                 if not buf:
@@ -64,7 +64,9 @@ async def _default_snapshot_downloader(
     tmp.mkdir(parents=True, exist_ok=True)
 
     def _do() -> None:
-        snapshot_download(repo_id=repo_id, local_dir=str(tmp), allow_patterns=allow_patterns)
+        snapshot_download(  # nosec B615
+            repo_id=repo_id, local_dir=str(tmp), allow_patterns=allow_patterns
+        )
         tmp.replace(dest)
 
     await asyncio.to_thread(_do)

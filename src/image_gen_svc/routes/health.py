@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import contextlib
+
 from fastapi import APIRouter
 
 from image_gen_svc.config import ImageGenSvcConfig
@@ -10,13 +12,11 @@ from image_gen_svc.pipeline_registry import PipelineRegistry
 
 def _gpu_vram_used_gb() -> float:
     """Best-effort VRAM read; returns 0.0 if torch/CUDA isn't available."""
-    try:
+    with contextlib.suppress(Exception):  # pragma: no cover — torch absent in unit tests
         import torch  # type: ignore
 
         if torch.cuda.is_available():
             return torch.cuda.memory_allocated(0) / 1e9
-    except Exception:  # pragma: no cover — torch absent in unit tests
-        pass
     return 0.0
 
 
