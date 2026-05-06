@@ -1,0 +1,19 @@
+name: Release
+
+on:
+  push:
+    branches: [master]
+
+jobs:
+  release:
+    uses: muxu-io/shared-workflows/.github/workflows/python-release.yml@master
+    secrets: inherit
+
+  docker:
+    needs: release
+    if: needs.release.outputs.released == 'true'
+    uses: muxu-io/shared-workflows/.github/workflows/docker-publish.yml@master
+    with:
+      image-name: ${{ github.repository }}
+      version: ${{ needs.release.outputs.version }}
+    secrets: inherit

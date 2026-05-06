@@ -2,7 +2,7 @@
 name = "image-gen-svc"
 version = "0.1.0"
 description = "Local diffusers HTTP server with model registry and SSE progress."
-requires-python = ">=3.11"
+requires-python = ">=3.11,<4.0"
 license = { text = "Apache-2.0" }
 dependencies = [
   "fastapi>=0.110,<1",
@@ -26,6 +26,8 @@ respx = ">=0.21"
 asgi-lifespan = ">=2.1"
 ruff = ">=0.6"
 black = ">=24.0"
+bandit = ">=1.7"
+pip-audit = ">=2.7"
 
 [build-system]
 requires = ["poetry-core>=2.0"]
