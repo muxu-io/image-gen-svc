@@ -8,11 +8,13 @@ on:
 
 jobs:
   checks:
+    if: github.event_name == 'pull_request' || github.event.head_commit.author.email != 'semantic-release'
     uses: muxu-io/shared-workflows/.github/workflows/python-checks.yml@master
     secrets: inherit
 
   integration:
     needs: checks
+    if: github.event_name == 'pull_request' || github.event.head_commit.author.email != 'semantic-release'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
