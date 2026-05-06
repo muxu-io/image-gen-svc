@@ -1,8 +1,14 @@
 name: Release
+run-name: Release
 
 on:
   push:
     branches: [master]
+
+permissions:
+  contents: write
+  packages: write
+  id-token: write
 
 jobs:
   release:
