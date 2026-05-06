@@ -79,7 +79,7 @@ def main() -> int:
     job_registry = JobRegistry()
 
     app = build_app(cfg, model_registry, pipeline_registry, job_registry)
-    uvicorn.run(app, host="0.0.0.0", port=cfg.port, log_level="info")
+    uvicorn.run(app, host="0.0.0.0", port=cfg.port, log_level="info")  # nosec B104
     return 0
 
 

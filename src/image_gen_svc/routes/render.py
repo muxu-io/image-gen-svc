@@ -184,7 +184,7 @@ def build_router(
             job_id=job_id,
             prompt=body.prompt,
             negative_prompt=body.negative_prompt,
-            seed=body.seed if body.seed is not None else random.randint(0, _SEED_MAX),
+            seed=body.seed if body.seed is not None else random.randint(0, _SEED_MAX),  # nosec B311
             model_id=body.model_id,
             width=body.width,
             height=body.height,
