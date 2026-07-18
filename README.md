@@ -41,6 +41,22 @@ docker run --rm \
 The script handles both shapes the registry uses: `url` entries are streamed
 directly; `repo_id` entries are pulled via `huggingface_hub.snapshot_download`.
 
+### GPU access (non-root container)
+
+The container runs as non-root (uid 10001), so the service user must be granted
+the group that owns the host's GPU device nodes — otherwise every render fails
+with `No CUDA GPUs are available` (`500 generation_failed`). Grant it by the
+**host's numeric GID**, not the `video` name (the name resolves to the
+container's `video` group, gid 44, which usually differs from the host's):
+
+```bash
+stat -c '%g' /dev/nvidia0        # host GID, e.g. 482
+docker run --gpus all --group-add 482 ... ghcr.io/muxu-io/image-gen-svc:v0.1.0
+```
+
+For compose, replace the `group_add: [video]` placeholder in
+`compose.example.yml` with that numeric GID.
+
 ## API
 
 ### `POST /render` — txt2img

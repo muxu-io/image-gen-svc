@@ -39,6 +39,7 @@ import socket
 import subprocess
 import time
 from collections.abc import Iterator
+from pathlib import Path
 
 import httpx
 import pytest
@@ -48,6 +49,31 @@ DEFAULT_GPU_MODELS_VOLUME = "image-gen-svc-integration-models"
 DEFAULT_GPU_RENDER_TIMEOUT_S = 1800.0
 HEALTH_TIMEOUT_S = 30.0
 HEALTH_POLL_INTERVAL_S = 0.5
+
+
+def _load_dotenv() -> None:
+    """Load `KEY=value` pairs from a repo-root `.env` into os.environ.
+
+    Lets `poetry run pytest -m gpu` pick up HF_TOKEN (for gated model repos)
+    without exporting it in the shell. Existing environment variables win, so
+    an explicit `HF_TOKEN=... pytest` still overrides the file. Copy
+    `.env.example` to `.env` to use it.
+    """
+    env_path = Path(__file__).resolve().parents[2] / ".env"
+    if not env_path.is_file():
+        return
+    for raw in env_path.read_text().splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        key = key.strip()
+        value = value.strip().strip("'\"")
+        if key and key not in os.environ:
+            os.environ[key] = value
+
+
+_load_dotenv()
 
 
 def _free_port() -> int:
