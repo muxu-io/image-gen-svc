@@ -12,12 +12,26 @@ always returns a single `MockPipeline` instance."""
 from __future__ import annotations
 
 import asyncio
+import gc
 from collections.abc import Callable
 
 from image_gen_svc.pipelines.base import PipelineAdapter
 from image_gen_svc.pipelines.mock import MockPipeline
 
 PipelineFactory = Callable[[], PipelineAdapter]
+
+
+def _reclaim() -> None:
+    """Force a GC cycle after evicting a pipeline.
+
+    Adapters drop their pipeline reference in `aclose()`, but pipelines using
+    accelerate's `enable_model_cpu_offload()` install hooks that form reference
+    cycles, so their offloaded weights stay resident in host RAM until a cyclic
+    GC pass runs. Without this, switching through several models accumulates
+    host RAM and eventually OOM-kills the process when a large model (e.g.
+    z-image) loads. `torch.cuda.empty_cache()` in the adapter only frees VRAM.
+    """
+    gc.collect()
 
 
 class PipelineRegistry:
@@ -45,6 +59,7 @@ class PipelineRegistry:
             if self._current is not None:
                 await self._current.aclose()
                 self._current = None
+                _reclaim()
             factory = self._factories.get(architecture)
             if factory is None:
                 raise KeyError(f"no factory registered for architecture: {architecture!r}")
@@ -60,4 +75,5 @@ class PipelineRegistry:
         if self._current is not None:
             await self._current.aclose()
             self._current = None
+            _reclaim()
         self._mock = None

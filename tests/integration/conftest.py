@@ -287,9 +287,12 @@ def gpu_container_base_url() -> Iterator[str]:
 
 
 @pytest.fixture(scope="session")
-def gpu_http(gpu_container_base_url: str) -> Iterator[httpx.Client]:
-    # Generous client timeout — generation latency varies by model and hardware.
-    with httpx.Client(base_url=gpu_container_base_url, timeout=300.0) as client:
+def gpu_http(gpu_container_base_url: str, gpu_render_timeout_s: float) -> Iterator[httpx.Client]:
+    # Client read timeout tracks the per-model render budget: a cold-loaded,
+    # CPU-offloaded model (e.g. z-image on a <24 GB card) can take many minutes
+    # for a single render, well past a fixed 300 s. Tie it to the same budget
+    # the render test polls against so a slow-but-valid render isn't cut off.
+    with httpx.Client(base_url=gpu_container_base_url, timeout=gpu_render_timeout_s) as client:
         yield client
 
 
