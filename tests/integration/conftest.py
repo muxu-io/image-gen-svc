@@ -39,6 +39,7 @@ import socket
 import subprocess
 import time
 from collections.abc import Iterator
+from pathlib import Path
 
 import httpx
 import pytest
@@ -48,6 +49,31 @@ DEFAULT_GPU_MODELS_VOLUME = "image-gen-svc-integration-models"
 DEFAULT_GPU_RENDER_TIMEOUT_S = 1800.0
 HEALTH_TIMEOUT_S = 30.0
 HEALTH_POLL_INTERVAL_S = 0.5
+
+
+def _load_dotenv() -> None:
+    """Load `KEY=value` pairs from a repo-root `.env` into os.environ.
+
+    Lets `poetry run pytest -m gpu` pick up HF_TOKEN (for gated model repos)
+    without exporting it in the shell. Existing environment variables win, so
+    an explicit `HF_TOKEN=... pytest` still overrides the file. Copy
+    `.env.example` to `.env` to use it.
+    """
+    env_path = Path(__file__).resolve().parents[2] / ".env"
+    if not env_path.is_file():
+        return
+    for raw in env_path.read_text().splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        key = key.strip()
+        value = value.strip().strip("'\"")
+        if key and key not in os.environ:
+            os.environ[key] = value
+
+
+_load_dotenv()
 
 
 def _free_port() -> int:
@@ -97,6 +123,30 @@ def _nvidia_host_available() -> bool:
     except (subprocess.SubprocessError, OSError):
         return False
     return True
+
+
+def _nvidia_device_gids() -> list[str]:
+    """Non-root group ids owning the host's /dev/nvidia* character devices.
+
+    The container runs as a non-root user (uid 10001), but the NVIDIA runtime
+    passes /dev/nvidia0 and /dev/nvidiactl into the container as root:video,
+    mode 0660. Without membership in that group the app user can't open the
+    device and torch reports no CUDA GPUs. We read the owning gid on the host
+    and grant it via `--group-add` so the non-root container can reach the GPU.
+    The gid is host-specific (e.g. `video`), so it's read at runtime rather than
+    hardcoded. Production run recipes (compose/k8s) that run this image non-root
+    need the equivalent `--group-add`.
+    """
+    gids: set[int] = set()
+    for path in sorted(Path("/dev").glob("nvidia*")):
+        try:
+            st = path.stat()
+        except OSError:
+            continue
+        # gid 0 (root) is unrestricted; nothing to grant.
+        if st.st_gid != 0:
+            gids.add(st.st_gid)
+    return [str(g) for g in sorted(gids)]
 
 
 def _wait_for_health(base_url: str, container_id: str) -> None:
@@ -204,6 +254,11 @@ def gpu_container_base_url() -> Iterator[str]:
         "-p",
         f"127.0.0.1:{port}:7300",
     ]
+    # Grant the non-root container the group(s) owning the NVIDIA devices so it
+    # can open the GPU. Without this the app user (uid 10001) hits NVML
+    # "Insufficient Permissions" and torch sees no CUDA device.
+    for gid in _nvidia_device_gids():
+        docker_args.extend(["--group-add", gid])
     # Forward HF_TOKEN when set on the host so adapters that fetch from gated
     # HF repos (e.g. chroma → FLUX.1-schnell) can authenticate inside the
     # container. Unset → tests for gated models skip cleanly.
@@ -232,9 +287,12 @@ def gpu_container_base_url() -> Iterator[str]:
 
 
 @pytest.fixture(scope="session")
-def gpu_http(gpu_container_base_url: str) -> Iterator[httpx.Client]:
-    # Generous client timeout — generation latency varies by model and hardware.
-    with httpx.Client(base_url=gpu_container_base_url, timeout=300.0) as client:
+def gpu_http(gpu_container_base_url: str, gpu_render_timeout_s: float) -> Iterator[httpx.Client]:
+    # Client read timeout tracks the per-model render budget: a cold-loaded,
+    # CPU-offloaded model (e.g. z-image on a <24 GB card) can take many minutes
+    # for a single render, well past a fixed 300 s. Tie it to the same budget
+    # the render test polls against so a slow-but-valid render isn't cut off.
+    with httpx.Client(base_url=gpu_container_base_url, timeout=gpu_render_timeout_s) as client:
         yield client
 
 

@@ -13,7 +13,8 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PIP_NO_CACHE_DIR=1
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    python3 python3-venv python3-pip \
+    python3 python3-venv python3-pip python3-dev \
+    gcc \
     git curl ca-certificates libgl1 libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
 
@@ -46,7 +47,13 @@ RUN pip install --upgrade pip && \
 ENV IMAGE_GEN_SVC_BASE_DIR=/app \
     IMAGE_GEN_SVC_PORT=7300 \
     IMAGE_GEN_SVC_MODELS_DIR=/models \
-    HF_HOME=/root/.cache/huggingface
+    HOME=/home/app \
+    HF_HOME=/home/app/.cache/huggingface
+
+RUN groupadd -g 10001 app && useradd -u 10001 -g 10001 -m -d /home/app app \
+    && mkdir -p /models /home/app/.cache/huggingface \
+    && chown -R 10001:10001 /models /home/app
+USER 10001:10001
 
 EXPOSE 7300
 CMD ["python3", "-m", "image_gen_svc"]

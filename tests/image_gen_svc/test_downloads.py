@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from pathlib import Path
 
 import pytest
@@ -51,6 +52,28 @@ async def test_coordinator_returns_failed_on_downloader_error(tmp_path: Path):
     state = await coord.ensure_present(model_id="m", url="http://x", dest=target)
     assert state == DownloadState.FAILED
     assert not target.exists()
+
+
+@pytest.mark.asyncio
+async def test_coordinator_logs_the_download_exception(tmp_path: Path, caplog):
+    """A failed download must be logged with the model id and the underlying
+    cause — the failure used to be swallowed with no trace, making a simple
+    permission error indistinguishable from a network error in ops."""
+
+    async def boom(url: str, dest: Path) -> None:
+        raise PermissionError("cannot write to /models")
+
+    coord = DownloadCoordinator(downloader=boom)
+    with caplog.at_level(logging.ERROR, logger="image_gen_svc"):
+        await coord.ensure_present(model_id="animagine", url="http://x", dest=tmp_path / "a.bin")
+
+    errors = [r for r in caplog.records if r.levelno >= logging.ERROR]
+    assert errors, "expected an error log for the failed download"
+    joined = " ".join(r.getMessage() for r in errors)
+    assert "animagine" in joined
+    assert any("cannot write to /models" in (r.exc_text or "") for r in errors) or (
+        "cannot write to /models" in joined
+    )
 
 
 @pytest.mark.asyncio
