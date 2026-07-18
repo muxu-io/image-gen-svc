@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 import hmac
 import json
+import logging
 import random
 from pathlib import Path
 
@@ -24,7 +25,7 @@ from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, Field, ValidationError
 
 from image_gen_svc.config import ImageGenSvcConfig
-from image_gen_svc.downloads import DownloadCoordinator
+from image_gen_svc.downloads import DownloadCoordinator, DownloadState
 from image_gen_svc.inference import RenderRequest, run_render
 from image_gen_svc.job_registry import JobEvent, JobRegistry
 from image_gen_svc.model_registry import (
@@ -34,6 +35,8 @@ from image_gen_svc.model_registry import (
     resolve_steps,
 )
 from image_gen_svc.pipeline_registry import PipelineRegistry
+
+logger = logging.getLogger("image_gen_svc")
 
 # Diffusion seeds don't need cryptographic strength — `random` is fine and
 # matches what every other diffusion UI uses. 32-bit range keeps the value
@@ -78,6 +81,41 @@ def build_router(
     download_coordinator: DownloadCoordinator,
 ) -> APIRouter:
     router = APIRouter()
+
+    # Hold strong references to in-flight background download tasks. asyncio
+    # keeps only weak references, so an un-referenced task can be garbage
+    # collected mid-run; this set keeps them alive until they finish.
+    download_tasks: set[asyncio.Task] = set()
+
+    def _fire_download(coro, *, job_id: str, model_id: str) -> None:
+        """Run a download in the background and surface failure to the job.
+
+        The download previously ran fire-and-forget with its result discarded,
+        so any failure (permissions, network, disk, auth) was invisible: the
+        client just saw `503 model_loading` until timeout. Now a failed
+        download logs and publishes a terminal `job_failed` so /events
+        subscribers stop waiting.
+        """
+        task = asyncio.create_task(coro)
+        download_tasks.add(task)
+
+        def _on_done(finished: asyncio.Task) -> None:
+            download_tasks.discard(finished)
+            try:
+                state = finished.result()
+            except Exception:  # _ensure catches internally; be defensive anyway
+                state = DownloadState.FAILED
+            if state == DownloadState.FAILED:
+                logger.error("model %r download failed", model_id)
+                job_registry.publish(
+                    job_id,
+                    JobEvent(
+                        type="job_failed",
+                        data={"error": "model_download_failed", "model": model_id},
+                    ),
+                )
+
+        task.add_done_callback(_on_done)
 
     async def _parse_json(request: Request) -> RenderBody:
         try:
@@ -146,10 +184,12 @@ def build_router(
                     job_id,
                     JobEvent(type="model_loading", data={"model": entry.id, "url": entry.url}),
                 )
-                asyncio.create_task(
+                _fire_download(
                     download_coordinator.ensure_present(
                         model_id=entry.id, url=entry.url, dest=Path(entry.path)
-                    )
+                    ),
+                    job_id=job_id,
+                    model_id=entry.id,
                 )
                 raise _envelope(
                     503,
@@ -165,13 +205,15 @@ def build_router(
                         data={"model": entry.id, "repo_id": entry.repo_id},
                     ),
                 )
-                asyncio.create_task(
+                _fire_download(
                     download_coordinator.ensure_snapshot_present(
                         model_id=entry.id,
                         repo_id=entry.repo_id,
                         dest=Path(entry.path),
                         allow_patterns=entry.allow_patterns,
-                    )
+                    ),
+                    job_id=job_id,
+                    model_id=entry.id,
                 )
                 raise _envelope(
                     503,

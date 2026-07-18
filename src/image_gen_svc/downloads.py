@@ -18,9 +18,12 @@ from __future__ import annotations
 
 import asyncio
 import enum
+import logging
 import urllib.request
 from collections.abc import Awaitable, Callable
 from pathlib import Path
+
+logger = logging.getLogger("image_gen_svc")
 
 
 class DownloadState(enum.StrEnum):
@@ -118,6 +121,7 @@ class DownloadCoordinator:
         try:
             await task
         except Exception:
+            logger.exception("download for model %r failed", model_id)
             async with self._lock:
                 self._inflight.pop(model_id, None)
             return DownloadState.FAILED

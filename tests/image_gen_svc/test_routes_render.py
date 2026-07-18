@@ -382,3 +382,83 @@ async def test_render_returns_503_when_snapshot_missing(tmp_path):
     assert body["error"] == "model_loading"
     assert body["job_id"] == "j-snap-503"
     assert "snapshot" in body["message"]
+
+
+@pytest.mark.asyncio
+async def test_render_publishes_job_failed_when_download_fails(tmp_path):
+    """When the background model download fails, the job must receive a terminal
+    job_failed event so /events subscribers stop waiting instead of the model
+    silently never appearing (the failure was previously swallowed)."""
+
+    import asyncio
+
+    import httpx
+    from asgi_lifespan import LifespanManager
+
+    from image_gen_svc.app import build_app
+    from image_gen_svc.config import ImageGenSvcConfig
+    from image_gen_svc.downloads import DownloadCoordinator
+    from image_gen_svc.job_registry import JobRegistry
+    from image_gen_svc.model_registry import ModelRegistry
+    from image_gen_svc.pipeline_registry import PipelineRegistry
+
+    cfg = ImageGenSvcConfig(
+        base_dir=tmp_path,
+        port=7300,
+        mock_only=False,
+        models_dir=tmp_path / "models",
+    )
+    raw = {
+        "models": {
+            "missing-model": {
+                "path": str(tmp_path / "missing.safetensors"),
+                "url": "http://example.com/missing.safetensors",
+                "architecture": "sdxl",
+                "aliases": [],
+            }
+        },
+        "default_alias": "missing-model",
+    }
+    reg = ModelRegistry._from_raw(raw)
+
+    async def boom(url: str, dest) -> None:
+        raise RuntimeError("download exploded")
+
+    coord = DownloadCoordinator(downloader=boom)
+    pipe_reg = PipelineRegistry(mock_only=False, factories={})
+    job_reg = JobRegistry()
+    app = build_app(cfg, reg, pipe_reg, job_reg, download_coordinator=coord)
+
+    async def drain(job_id: str) -> list:
+        evs = []
+        async for ev in job_reg.subscribe(job_id):
+            evs.append(ev)
+        return evs
+
+    async with LifespanManager(app):
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+            r = await c.post(
+                "/render",
+                json={
+                    "prompt": "x",
+                    "model_id": "missing-model",
+                    "seed": 1,
+                    "width": 64,
+                    "height": 64,
+                    "steps": 1,
+                    "guidance": 1.0,
+                    "job_id": "j-dlfail",
+                },
+            )
+            assert r.status_code == 503
+
+            # A terminal failure event must arrive once the background download
+            # fails; without the fix the stream never terminates and this times out.
+            try:
+                events = await asyncio.wait_for(drain("j-dlfail"), timeout=2.0)
+            except TimeoutError:
+                events = []
+
+    types = [e.type for e in events]
+    assert "job_failed" in types, f"expected terminal job_failed, got {types}"
