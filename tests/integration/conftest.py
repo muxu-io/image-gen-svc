@@ -125,6 +125,30 @@ def _nvidia_host_available() -> bool:
     return True
 
 
+def _nvidia_device_gids() -> list[str]:
+    """Non-root group ids owning the host's /dev/nvidia* character devices.
+
+    The container runs as a non-root user (uid 10001), but the NVIDIA runtime
+    passes /dev/nvidia0 and /dev/nvidiactl into the container as root:video,
+    mode 0660. Without membership in that group the app user can't open the
+    device and torch reports no CUDA GPUs. We read the owning gid on the host
+    and grant it via `--group-add` so the non-root container can reach the GPU.
+    The gid is host-specific (e.g. `video`), so it's read at runtime rather than
+    hardcoded. Production run recipes (compose/k8s) that run this image non-root
+    need the equivalent `--group-add`.
+    """
+    gids: set[int] = set()
+    for path in sorted(Path("/dev").glob("nvidia*")):
+        try:
+            st = path.stat()
+        except OSError:
+            continue
+        # gid 0 (root) is unrestricted; nothing to grant.
+        if st.st_gid != 0:
+            gids.add(st.st_gid)
+    return [str(g) for g in sorted(gids)]
+
+
 def _wait_for_health(base_url: str, container_id: str) -> None:
     deadline = time.monotonic() + HEALTH_TIMEOUT_S
     last_err: Exception | None = None
@@ -230,6 +254,11 @@ def gpu_container_base_url() -> Iterator[str]:
         "-p",
         f"127.0.0.1:{port}:7300",
     ]
+    # Grant the non-root container the group(s) owning the NVIDIA devices so it
+    # can open the GPU. Without this the app user (uid 10001) hits NVML
+    # "Insufficient Permissions" and torch sees no CUDA device.
+    for gid in _nvidia_device_gids():
+        docker_args.extend(["--group-add", gid])
     # Forward HF_TOKEN when set on the host so adapters that fetch from gated
     # HF repos (e.g. chroma → FLUX.1-schnell) can authenticate inside the
     # container. Unset → tests for gated models skip cleanly.
