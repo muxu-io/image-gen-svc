@@ -30,6 +30,7 @@ class SDXLPipelineAdapter:
 
         self._pipe = StableDiffusionXLPipeline.from_single_file(
             str(model_path),
+            config="stabilityai/stable-diffusion-xl-base-1.0",
             torch_dtype=torch.float16,
             use_safetensors=True,
         ).to("cuda")
